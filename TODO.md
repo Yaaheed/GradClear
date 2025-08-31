@@ -8,6 +8,9 @@
   - Officer approval and rejection of clearance requests.
   - Loading officer requests by status.
   - Admin user management listing.
+  - Admin user edit functionality with modal form to update user details in Firestore.
+  - Admin reports page showing summary statistics of clearance requests.
+  - Admin system settings page with basic app settings.
   - Profile data loading and updating.
   - Real-time Firestore listeners for dashboard updates.
   - Authentication state handling and role-based dashboard display.
@@ -15,8 +18,6 @@
   - Dark mode toggle and notifications.
 
 ## Pending
-- Implement edit user functionality in admin dashboard.
-- Implement detailed reports and system settings in admin dashboard.
 - Add validation and error handling improvements.
 - Add unit and integration tests for critical functions.
 - Perform end-to-end testing of all user roles and flows.
@@ -24,7 +25,5 @@
 - Deploy and configure hosting and backend services.
 
 ## Next Steps
-- Implement admin user edit functionality.
-- Implement admin reports and system settings pages.
 - Conduct thorough testing of all implemented features.
 - Prepare deployment scripts and documentation.

@@ -1823,10 +1823,251 @@
             }
         }
 
-        // Edit User Placeholder
+        // Edit User Modal Elements
+        const editUserModal = document.createElement('div');
+        editUserModal.id = 'edit-user-modal';
+        editUserModal.style.position = 'fixed';
+        editUserModal.style.top = '0';
+        editUserModal.style.left = '0';
+        editUserModal.style.width = '100%';
+        editUserModal.style.height = '100%';
+        editUserModal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+        editUserModal.style.display = 'none';
+        editUserModal.style.alignItems = 'center';
+        editUserModal.style.justifyContent = 'center';
+        editUserModal.style.zIndex = '10000';
+
+        editUserModal.innerHTML = `
+            <div style="background: var(--card-bg); padding: 20px; border-radius: 15px; width: 400px; max-width: 90%;">
+                <h3>Edit User</h3>
+                <form id="edit-user-form">
+                    <div class="form-group">
+                        <label for="edit-user-name">Name</label>
+                        <input type="text" id="edit-user-name" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-user-role">Role</label>
+                        <select id="edit-user-role" class="form-control" required>
+                            <option value="student">Student</option>
+                            <option value="officer">Officer</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="edit-student-id-group">
+                        <label for="edit-user-student-id">Student ID</label>
+                        <input type="text" id="edit-user-student-id" class="form-control">
+                    </div>
+                    <div class="form-group" id="edit-department-group" style="display:none;">
+                        <label for="edit-user-department">Department</label>
+                        <input type="text" id="edit-user-department" class="form-control">
+                    </div>
+                    <button type="submit" class="btn">Save</button>
+                    <button type="button" class="btn btn-outline" id="edit-user-cancel">Cancel</button>
+                </form>
+            </div>
+        `;
+
+        document.body.appendChild(editUserModal);
+
+        const editUserForm = document.getElementById('edit-user-form');
+        const editUserNameInput = document.getElementById('edit-user-name');
+        const editUserRoleSelect = document.getElementById('edit-user-role');
+        const editUserStudentIdInput = document.getElementById('edit-user-student-id');
+        const editUserDepartmentInput = document.getElementById('edit-user-department');
+        const editStudentIdGroup = document.getElementById('edit-student-id-group');
+        const editDepartmentGroup = document.getElementById('edit-department-group');
+        const editUserCancelBtn = document.getElementById('edit-user-cancel');
+
+        let editingUserId = null;
+
+        editUserRoleSelect.addEventListener('change', () => {
+            const role = editUserRoleSelect.value;
+            if (role === 'student') {
+                editStudentIdGroup.style.display = 'block';
+                editDepartmentGroup.style.display = 'none';
+            } else if (role === 'officer') {
+                editStudentIdGroup.style.display = 'none';
+                editDepartmentGroup.style.display = 'block';
+            } else {
+                editStudentIdGroup.style.display = 'none';
+                editDepartmentGroup.style.display = 'none';
+            }
+        });
+
         function editUser(userId) {
-            showNotification(`Edit user functionality not implemented yet for user ID: ${userId}`, 'warning');
+            editingUserId = userId;
+            db.collection('users').doc(userId).get()
+                .then(doc => {
+                    if (doc.exists) {
+                        const data = doc.data();
+                        editUserNameInput.value = data.name || '';
+                        editUserRoleSelect.value = data.role || 'student';
+                        editUserRoleSelect.dispatchEvent(new Event('change'));
+                        editUserStudentIdInput.value = data.studentId || '';
+                        editUserDepartmentInput.value = data.department || '';
+                        editUserModal.style.display = 'flex';
+                    } else {
+                        showNotification('User not found.', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching user data:', error);
+                    showNotification('Failed to load user data.', 'error');
+                });
         }
+
+        editUserCancelBtn.addEventListener('click', () => {
+            editUserModal.style.display = 'none';
+            editingUserId = null;
+        });
+
+        editUserForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (!editingUserId) return;
+            const updatedData = {
+                name: editUserNameInput.value.trim(),
+                role: editUserRoleSelect.value,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            };
+            if (updatedData.role === 'student') {
+                updatedData.studentId = editUserStudentIdInput.value.trim();
+                updatedData.department = firebase.firestore.FieldValue.delete();
+            } else if (updatedData.role === 'officer') {
+                updatedData.department = editUserDepartmentInput.value.trim();
+                updatedData.studentId = firebase.firestore.FieldValue.delete();
+            } else {
+                updatedData.studentId = firebase.firestore.FieldValue.delete();
+                updatedData.department = firebase.firestore.FieldValue.delete();
+            }
+            db.collection('users').doc(editingUserId).update(updatedData)
+                .then(() => {
+                    showNotification('User updated successfully.', 'success');
+                    editUserModal.style.display = 'none';
+                    editingUserId = null;
+                    loadUsers();
+                })
+                .catch(error => {
+                    console.error('Error updating user:', error);
+                    showNotification('Failed to update user.', 'error');
+                });
+        });
+
+        // Reports Tab Content
+        async function loadReports() {
+            const reportsTab = document.getElementById('reports-tab');
+            if (!reportsTab) {
+                const adminDashboard = document.getElementById('admin-dashboard');
+                const reportsCard = document.createElement('div');
+                reportsCard.className = 'card';
+                reportsCard.id = 'reports-tab';
+                reportsCard.innerHTML = `
+                    <div class="card-header">
+                        <div class="card-title">Reports</div>
+                    </div>
+                    <div id="reports-content">
+                        <p>Loading reports...</p>
+                    </div>
+                `;
+                adminDashboard.appendChild(reportsCard);
+            }
+            const reportsContent = document.getElementById('reports-content');
+            reportsContent.innerHTML = '<p>Loading reports...</p>';
+
+            try {
+                const clearanceSnapshot = await db.collection('clearance_requests').get();
+                const totalRequests = clearanceSnapshot.size;
+                let approvedCount = 0;
+                let rejectedCount = 0;
+                let pendingCount = 0;
+                const typeCounts = {};
+
+                clearanceSnapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (data.status === 'approved') approvedCount++;
+                    else if (data.status === 'rejected') rejectedCount++;
+                    else pendingCount++;
+
+                    if (data.clearanceType) {
+                        typeCounts[data.clearanceType] = (typeCounts[data.clearanceType] || 0) + 1;
+                    }
+                });
+
+                let reportHtml = `
+                    <p>Total Clearance Requests: ${totalRequests}</p>
+                    <p>Approved: ${approvedCount}</p>
+                    <p>Rejected: ${rejectedCount}</p>
+                    <p>Pending: ${pendingCount}</p>
+                    <h4>Requests by Type:</h4>
+                    <ul>
+                `;
+
+                for (const [type, count] of Object.entries(typeCounts)) {
+                    reportHtml += `<li>${type.charAt(0).toUpperCase() + type.slice(1)}: ${count}</li>`;
+                }
+                reportHtml += '</ul>';
+
+                reportsContent.innerHTML = reportHtml;
+            } catch (error) {
+                console.error('Error loading reports:', error);
+                reportsContent.innerHTML = '<p>Failed to load reports.</p>';
+            }
+        }
+
+        // System Settings Tab Content
+        async function loadSystemSettings() {
+            const systemTab = document.getElementById('system-tab');
+            if (!systemTab) {
+                const adminDashboard = document.getElementById('admin-dashboard');
+                const systemCard = document.createElement('div');
+                systemCard.className = 'card';
+                systemCard.id = 'system-tab';
+                systemCard.innerHTML = `
+                    <div class="card-header">
+                        <div class="card-title">System Settings</div>
+                    </div>
+                    <form id="system-settings-form">
+                        <div class="form-group">
+                            <label for="app-name">Application Name</label>
+                            <input type="text" id="app-name" class="form-control" value="Digital Clearance" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="notification-email">Notification Email</label>
+                            <input type="email" id="notification-email" class="form-control" placeholder="Enter notification email">
+                        </div>
+                        <button type="submit" class="btn">Save Settings</button>
+                    </form>
+                `;
+                adminDashboard.appendChild(systemCard);
+
+                document.getElementById('system-settings-form').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const appName = document.getElementById('app-name').value.trim();
+                    const notificationEmail = document.getElementById('notification-email').value.trim();
+                    try {
+                        await db.collection('settings').doc('app').set({
+                            appName,
+                            notificationEmail,
+                            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        });
+                        showNotification('Settings saved successfully.', 'success');
+                    } catch (error) {
+                        console.error('Error saving settings:', error);
+                        showNotification('Failed to save settings.', 'error');
+                    }
+                });
+            }
+        }
+
+        // Load reports and system settings when tabs are clicked
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                if (item.getAttribute('data-tab') === 'reports') {
+                    loadReports();
+                } else if (item.getAttribute('data-tab') === 'system') {
+                    loadSystemSettings();
+                }
+            });
+        });
 
         // Profile Management - Load Profile Data
         function loadProfile() {
