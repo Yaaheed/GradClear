@@ -527,29 +527,129 @@
             color: var(--danger-color);
         }
         
+        /* Missing Styles for Dashboard Elements */
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--shadow-dark);
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .request-item {
+            padding: 15px;
+            margin-bottom: 10px;
+            background: var(--bg-color);
+            border-radius: 10px;
+            box-shadow: 5px 5px 10px var(--shadow-dark), -5px -5px 10px var(--shadow-light);
+        }
+
+        .request-item p {
+            margin: 5px 0;
+        }
+
+        .user-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--shadow-dark);
+        }
+
+        .user-item:last-child {
+            border-bottom: none;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .document-item {
+            padding: 15px;
+            margin-bottom: 15px;
+            background: var(--bg-color);
+            border-radius: 10px;
+            box-shadow: 5px 5px 10px var(--shadow-dark), -5px -5px 10px var(--shadow-light);
+        }
+
+        .document-info h4 {
+            margin-bottom: 5px;
+            color: var(--primary-color);
+        }
+
+        .document-info p {
+            margin: 3px 0;
+            font-size: 14px;
+        }
+
+        .document-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        /* Loading states */
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            border: 2px solid var(--primary-color);
+            border-top: 2px solid transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
         /* Mobile-specific styles */
         @media (max-width: 480px) {
             .btn {
                 padding: 10px 20px;
                 font-size: 14px;
             }
-            
+
             .auth-card {
                 padding: 20px 15px;
             }
-            
+
             .dashboard-header {
                 flex-direction: column;
                 align-items: flex-start;
             }
-            
+
             .dashboard-header .btn {
                 margin-top: 15px;
                 align-self: flex-end;
             }
-            
+
             .card {
                 padding: 15px;
+            }
+
+            .action-buttons {
+                flex-direction: column;
+            }
+
+            .document-actions {
+                flex-direction: column;
             }
         }
     </style>
@@ -1391,6 +1491,672 @@
 
         // Run initialization when DOM is loaded
         document.addEventListener('DOMContentLoaded', init);
-    </script>
-</body>
-</html>
+
+        // Student Clearance Request Submission
+        document.getElementById('request-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUser || currentUser.role !== 'student') {
+                showNotification('Unauthorized action.', 'error');
+                return;
+            }
+            const clearanceType = document.getElementById('clearance-type').value;
+            const fileInput = document.getElementById('clearance-document');
+            if (!clearanceType) {
+                showNotification('Please select a clearance type.', 'error');
+                return;
+            }
+            if (fileInput.files.length === 0) {
+                showNotification('Please upload a document.', 'error');
+                return;
+            }
+            const file = fileInput.files[0];
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            const originalText = submitBtn.textContent;
+            submitBtn.textContent = 'Submitting...';
+            submitBtn.disabled = true;
+
+            try {
+                // Upload file to Firebase Storage
+                const storageRef = storage.ref();
+                const fileRef = storageRef.child(`clearance_documents/${currentUser.id}/${clearanceType}/${file.name}`);
+                await fileRef.put(file);
+                const fileURL = await fileRef.getDownloadURL();
+
+                // Add clearance request to Firestore
+                const requestData = {
+                    userId: currentUser.id,
+                    userName: currentUser.name,
+                    studentId: currentUser.studentId || '',
+                    clearanceType: clearanceType,
+                    documentURL: fileURL,
+                    status: 'pending',
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                };
+                await db.collection('clearance_requests').add(requestData);
+
+                showNotification('Clearance request submitted successfully!', 'success');
+                e.target.reset();
+                // Refresh clearance status and documents
+                loadClearanceStatus();
+                loadDocuments();
+            } catch (error) {
+                console.error('Error submitting clearance request:', error);
+                showNotification('Failed to submit clearance request.', 'error');
+            } finally {
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
+            }
+        });
+
+        // Load Clearance Status for Student Dashboard
+        async function loadClearanceStatus() {
+            if (!currentUser || currentUser.role !== 'student') return;
+            const clearanceStatusDiv = document.getElementById('clearance-status');
+            clearanceStatusDiv.innerHTML = '';
+            const clearanceTypes = ['library', 'bursary', 'department', 'hostel'];
+            try {
+                for (const type of clearanceTypes) {
+                    const querySnapshot = await db.collection('clearance_requests')
+                        .where('userId', '==', currentUser.id)
+                        .where('clearanceType', '==', type)
+                        .orderBy('createdAt', 'desc')
+                        .limit(1)
+                        .get();
+                    let status = 'Pending';
+                    let statusClass = 'status-pending';
+                    if (!querySnapshot.empty) {
+                        const doc = querySnapshot.docs[0].data();
+                        status = doc.status.charAt(0).toUpperCase() + doc.status.slice(1);
+                        if (doc.status === 'approved') statusClass = 'status-approved';
+                        else if (doc.status === 'rejected') statusClass = 'status-rejected';
+                        else statusClass = 'status-pending';
+                    }
+                    const statusItem = document.createElement('div');
+                    statusItem.className = 'status-item';
+                    statusItem.innerHTML = `<p>${type.charAt(0).toUpperCase() + type.slice(1)}</p><span class="status-badge ${statusClass}">${status}</span>`;
+                    clearanceStatusDiv.appendChild(statusItem);
+                }
+            } catch (error) {
+                console.error('Error loading clearance status:', error);
+            }
+        }
+
+        // Load Documents for Student Dashboard
+        async function loadDocuments() {
+            if (!currentUser || currentUser.role !== 'student') return;
+            const documentsList = document.getElementById('documents-list');
+            documentsList.innerHTML = '';
+            const clearanceTypes = ['library', 'bursary', 'department', 'hostel'];
+            try {
+                for (const type of clearanceTypes) {
+                    const querySnapshot = await db.collection('clearance_requests')
+                        .where('userId', '==', currentUser.id)
+                        .where('clearanceType', '==', type)
+                        .orderBy('createdAt', 'desc')
+                        .limit(1)
+                        .get();
+                    let uploadDate = 'Not uploaded';
+                    let status = 'Pending Review';
+                    let statusClass = 'status-pending';
+                    let documentURL = null;
+                    if (!querySnapshot.empty) {
+                        const doc = querySnapshot.docs[0].data();
+                        if (doc.createdAt && doc.createdAt.toDate) {
+                            uploadDate = doc.createdAt.toDate().toLocaleDateString();
+                        }
+                        status = doc.status.charAt(0).toUpperCase() + doc.status.slice(1);
+                        if (doc.status === 'approved') statusClass = 'status-approved';
+                        else if (doc.status === 'rejected') statusClass = 'status-rejected';
+                        else statusClass = 'status-pending';
+                        documentURL = doc.documentURL || null;
+                    }
+                    const documentItem = document.createElement('div');
+                    documentItem.className = 'document-item';
+                    documentItem.innerHTML = `
+                        <div class="document-info">
+                            <h4>${type.charAt(0).toUpperCase() + type.slice(1)} Clearance Form</h4>
+                            <p>Uploaded on: <span id="${type}-upload-date">${uploadDate}</span></p>
+                            <p>Status: <span class="status-badge ${statusClass}">${status}</span></p>
+                        </div>
+                        <div class="document-actions">
+                            <button class="btn btn-outline" onclick="uploadDocument('${type}')">Upload</button>
+                            <button class="btn btn-outline" onclick="viewDocument('${type}')">View</button>
+                        </div>
+                    `;
+                    documentsList.appendChild(documentItem);
+                }
+            } catch (error) {
+                console.error('Error loading documents:', error);
+            }
+        }
+
+        // Upload Document Button Handler
+        function uploadDocument(type) {
+            document.getElementById('clearance-type').value = type;
+            document.getElementById('submit-tab').style.display = 'block';
+            document.querySelector('.nav-item[data-tab="submit"]').classList.add('active');
+            document.querySelectorAll('.nav-item').forEach(item => {
+                if (item.getAttribute('data-tab') !== 'submit') item.classList.remove('active');
+            });
+            document.querySelectorAll('.card').forEach(card => {
+                if (card.id === 'submit-tab') card.style.display = 'block';
+                else card.style.display = 'none';
+            });
+        }
+
+        // View Document Button Handler
+        async function viewDocument(type) {
+            if (!currentUser || !['student', 'officer', 'admin'].includes(currentUser.role)) {
+                showNotification('Unauthorized action.', 'error');
+                return;
+            }
+            try {
+                let query = db.collection('clearance_requests');
+                if (currentUser.role === 'student') {
+                    query = query.where('userId', '==', currentUser.id).where('clearanceType', '==', type);
+                } else {
+                    // Officers and admins can view all requests of the type
+                    query = query.where('clearanceType', '==', type);
+                }
+                const querySnapshot = await query.orderBy('createdAt', 'desc').limit(1).get();
+                if (!querySnapshot.empty) {
+                    const doc = querySnapshot.docs[0].data();
+                    if (doc.documentURL) {
+                        window.open(doc.documentURL, '_blank');
+                    } else {
+                        showNotification('No document available to view.', 'error');
+                    }
+                } else {
+                    showNotification('No document found.', 'error');
+                }
+            } catch (error) {
+                console.error('Error viewing document:', error);
+                showNotification('Failed to view document.', 'error');
+            }
+        }
+
+        // Officer Approve Request
+        async function approveRequest(requestId) {
+            if (!currentUser || currentUser.role !== 'officer') {
+                showNotification('Unauthorized action.', 'error');
+                return;
+            }
+            try {
+                await db.collection('clearance_requests').doc(requestId).update({
+                    status: 'approved',
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    approvedBy: currentUser.id,
+                });
+                showNotification('Request approved.', 'success');
+                loadOfficerRequests();
+            } catch (error) {
+                console.error('Error approving request:', error);
+                showNotification('Failed to approve request.', 'error');
+            }
+        }
+
+        // Officer Reject Request
+        async function rejectRequest(requestId) {
+            if (!currentUser || currentUser.role !== 'officer') {
+                showNotification('Unauthorized action.', 'error');
+                return;
+            }
+            try {
+                await db.collection('clearance_requests').doc(requestId).update({
+                    status: 'rejected',
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    rejectedBy: currentUser.id,
+                });
+                showNotification('Request rejected.', 'success');
+                loadOfficerRequests();
+            } catch (error) {
+                console.error('Error rejecting request:', error);
+                showNotification('Failed to reject request.', 'error');
+            }
+        }
+
+        // Load Officer Requests (Pending, Approved, Rejected)
+        async function loadOfficerRequests() {
+            if (!currentUser || currentUser.role !== 'officer') return;
+            const pendingDiv = document.getElementById('pending-requests');
+            const approvedDiv = document.getElementById('approved-requests');
+            const rejectedDiv = document.getElementById('rejected-requests');
+            pendingDiv.innerHTML = '';
+            approvedDiv.innerHTML = '';
+            rejectedDiv.innerHTML = '';
+
+            try {
+                const snapshot = await db.collection('clearance_requests')
+                    .where('status', 'in', ['pending', 'approved', 'rejected'])
+                    .orderBy('createdAt', 'desc')
+                    .get();
+
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    const requestId = doc.id;
+                    const item = document.createElement('div');
+                    item.className = 'request-item';
+                    let statusText = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+                    let statusInfo = '';
+                    if (data.status === 'approved' && data.updatedAt && data.updatedAt.toDate) {
+                        statusInfo = ` - Approved on ${data.updatedAt.toDate().toLocaleDateString()}`;
+                    } else if (data.status === 'rejected' && data.updatedAt && data.updatedAt.toDate) {
+                        statusInfo = ` - Rejected on ${data.updatedAt.toDate().toLocaleDateString()}`;
+                    }
+                    item.innerHTML = `
+                        <p><strong>${data.userName}</strong> (${data.studentId})</p>
+                        <p>${data.clearanceType.charAt(0).toUpperCase() + data.clearanceType.slice(1)} Clearance${statusInfo}</p>
+                    `;
+
+                    const actionDiv = document.createElement('div');
+                    actionDiv.className = 'action-buttons';
+
+                    if (data.status === 'pending') {
+                        const approveBtn = document.createElement('button');
+                        approveBtn.className = 'btn';
+                        approveBtn.style.padding = '5px 10px';
+                        approveBtn.style.marginRight = '10px';
+                        approveBtn.textContent = 'Approve';
+                        approveBtn.onclick = () => approveRequest(requestId);
+
+                        const rejectBtn = document.createElement('button');
+                        rejectBtn.className = 'btn btn-outline';
+                        rejectBtn.style.padding = '5px 10px';
+                        rejectBtn.textContent = 'Reject';
+                        rejectBtn.onclick = () => rejectRequest(requestId);
+
+                        actionDiv.appendChild(approveBtn);
+                        actionDiv.appendChild(rejectBtn);
+                        item.appendChild(actionDiv);
+                        pendingDiv.appendChild(item);
+                    } else if (data.status === 'approved') {
+                        const viewBtn = document.createElement('button');
+                        viewBtn.className = 'btn btn-outline';
+                        viewBtn.style.padding = '5px 10px';
+                        viewBtn.textContent = 'View Document';
+                        viewBtn.onclick = () => viewDocument(requestId);
+                        actionDiv.appendChild(viewBtn);
+                        item.appendChild(actionDiv);
+                        approvedDiv.appendChild(item);
+                    } else if (data.status === 'rejected') {
+                        const reason = data.rejectionReason || 'No reason provided';
+                        const reasonP = document.createElement('p');
+                        reasonP.innerHTML = `<em>Reason: ${reason}</em>`;
+                        item.appendChild(reasonP);
+
+                        const viewBtn = document.createElement('button');
+                        viewBtn.className = 'btn btn-outline';
+                        viewBtn.style.padding = '5px 10px';
+                        viewBtn.textContent = 'View Document';
+                        viewBtn.onclick = () => viewDocument(requestId);
+                        actionDiv.appendChild(viewBtn);
+                        item.appendChild(actionDiv);
+                        rejectedDiv.appendChild(item);
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading officer requests:', error);
+            }
+        }
+
+        // Admin User Management - Load Users
+        async function loadUsers() {
+            if (!currentUser || currentUser.role !== 'admin') return;
+            const userListDiv = document.getElementById('user-list');
+            userListDiv.innerHTML = '';
+            try {
+                const snapshot = await db.collection('users').orderBy('createdAt', 'desc').get();
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    const userId = doc.id;
+                    const item = document.createElement('div');
+                    item.className = 'user-item';
+                    item.innerHTML = `
+                        <p><strong>${data.name}</strong> - ${data.role.charAt(0).toUpperCase() + data.role.slice(1)} (${data.studentId || data.department || ''})</p>
+                        <button class="btn btn-outline" style="padding: 5px 10px;" onclick="editUser('${userId}')">Edit</button>
+                    `;
+                    userListDiv.appendChild(item);
+                });
+            } catch (error) {
+                console.error('Error loading users:', error);
+            }
+        }
+
+        // Edit User Modal Elements
+        const editUserModal = document.createElement('div');
+        editUserModal.id = 'edit-user-modal';
+        editUserModal.style.position = 'fixed';
+        editUserModal.style.top = '0';
+        editUserModal.style.left = '0';
+        editUserModal.style.width = '100%';
+        editUserModal.style.height = '100%';
+        editUserModal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+        editUserModal.style.display = 'none';
+        editUserModal.style.alignItems = 'center';
+        editUserModal.style.justifyContent = 'center';
+        editUserModal.style.zIndex = '10000';
+
+        editUserModal.innerHTML = `
+            <div style="background: var(--card-bg); padding: 20px; border-radius: 15px; width: 400px; max-width: 90%;">
+                <h3>Edit User</h3>
+                <form id="edit-user-form">
+                    <div class="form-group">
+                        <label for="edit-user-name">Name</label>
+                        <input type="text" id="edit-user-name" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-user-role">Role</label>
+                        <select id="edit-user-role" class="form-control" required>
+                            <option value="student">Student</option>
+                            <option value="officer">Officer</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="edit-student-id-group">
+                        <label for="edit-user-student-id">Student ID</label>
+                        <input type="text" id="edit-user-student-id" class="form-control">
+                    </div>
+                    <div class="form-group" id="edit-department-group" style="display:none;">
+                        <label for="edit-user-department">Department</label>
+                        <input type="text" id="edit-user-department" class="form-control">
+                    </div>
+                    <button type="submit" class="btn">Save</button>
+                    <button type="button" class="btn btn-outline" id="edit-user-cancel">Cancel</button>
+                </form>
+            </div>
+        `;
+
+        document.body.appendChild(editUserModal);
+
+        const editUserForm = document.getElementById('edit-user-form');
+        const editUserNameInput = document.getElementById('edit-user-name');
+        const editUserRoleSelect = document.getElementById('edit-user-role');
+        const editUserStudentIdInput = document.getElementById('edit-user-student-id');
+        const editUserDepartmentInput = document.getElementById('edit-user-department');
+        const editStudentIdGroup = document.getElementById('edit-student-id-group');
+        const editDepartmentGroup = document.getElementById('edit-department-group');
+        const editUserCancelBtn = document.getElementById('edit-user-cancel');
+
+        let editingUserId = null;
+
+        editUserRoleSelect.addEventListener('change', () => {
+            const role = editUserRoleSelect.value;
+            if (role === 'student') {
+                editStudentIdGroup.style.display = 'block';
+                editDepartmentGroup.style.display = 'none';
+            } else if (role === 'officer') {
+                editStudentIdGroup.style.display = 'none';
+                editDepartmentGroup.style.display = 'block';
+            } else {
+                editStudentIdGroup.style.display = 'none';
+                editDepartmentGroup.style.display = 'none';
+            }
+        });
+
+        function editUser(userId) {
+            editingUserId = userId;
+            db.collection('users').doc(userId).get()
+                .then(doc => {
+                    if (doc.exists) {
+                        const data = doc.data();
+                        editUserNameInput.value = data.name || '';
+                        editUserRoleSelect.value = data.role || 'student';
+                        editUserRoleSelect.dispatchEvent(new Event('change'));
+                        editUserStudentIdInput.value = data.studentId || '';
+                        editUserDepartmentInput.value = data.department || '';
+                        editUserModal.style.display = 'flex';
+                    } else {
+                        showNotification('User not found.', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching user data:', error);
+                    showNotification('Failed to load user data.', 'error');
+                });
+        }
+
+        editUserCancelBtn.addEventListener('click', () => {
+            editUserModal.style.display = 'none';
+            editingUserId = null;
+        });
+
+        editUserForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (!editingUserId) return;
+            const updatedData = {
+                name: editUserNameInput.value.trim(),
+                role: editUserRoleSelect.value,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            };
+            if (updatedData.role === 'student') {
+                updatedData.studentId = editUserStudentIdInput.value.trim();
+                updatedData.department = firebase.firestore.FieldValue.delete();
+            } else if (updatedData.role === 'officer') {
+                updatedData.department = editUserDepartmentInput.value.trim();
+                updatedData.studentId = firebase.firestore.FieldValue.delete();
+            } else {
+                updatedData.studentId = firebase.firestore.FieldValue.delete();
+                updatedData.department = firebase.firestore.FieldValue.delete();
+            }
+            db.collection('users').doc(editingUserId).update(updatedData)
+                .then(() => {
+                    showNotification('User updated successfully.', 'success');
+                    editUserModal.style.display = 'none';
+                    editingUserId = null;
+                    loadUsers();
+                })
+                .catch(error => {
+                    console.error('Error updating user:', error);
+                    showNotification('Failed to update user.', 'error');
+                });
+        });
+
+        // Reports Tab Content
+        async function loadReports() {
+            const reportsTab = document.getElementById('reports-tab');
+            if (!reportsTab) {
+                const adminDashboard = document.getElementById('admin-dashboard');
+                const reportsCard = document.createElement('div');
+                reportsCard.className = 'card';
+                reportsCard.id = 'reports-tab';
+                reportsCard.innerHTML = `
+                    <div class="card-header">
+                        <div class="card-title">Reports</div>
+                    </div>
+                    <div id="reports-content">
+                        <p>Loading reports...</p>
+                    </div>
+                `;
+                adminDashboard.appendChild(reportsCard);
+            }
+            const reportsContent = document.getElementById('reports-content');
+            reportsContent.innerHTML = '<p>Loading reports...</p>';
+
+            try {
+                const clearanceSnapshot = await db.collection('clearance_requests').get();
+                const totalRequests = clearanceSnapshot.size;
+                let approvedCount = 0;
+                let rejectedCount = 0;
+                let pendingCount = 0;
+                const typeCounts = {};
+
+                clearanceSnapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (data.status === 'approved') approvedCount++;
+                    else if (data.status === 'rejected') rejectedCount++;
+                    else pendingCount++;
+
+                    if (data.clearanceType) {
+                        typeCounts[data.clearanceType] = (typeCounts[data.clearanceType] || 0) + 1;
+                    }
+                });
+
+                let reportHtml = `
+                    <p>Total Clearance Requests: ${totalRequests}</p>
+                    <p>Approved: ${approvedCount}</p>
+                    <p>Rejected: ${rejectedCount}</p>
+                    <p>Pending: ${pendingCount}</p>
+                    <h4>Requests by Type:</h4>
+                    <ul>
+                `;
+
+                for (const [type, count] of Object.entries(typeCounts)) {
+                    reportHtml += `<li>${type.charAt(0).toUpperCase() + type.slice(1)}: ${count}</li>`;
+                }
+                reportHtml += '</ul>';
+
+                reportsContent.innerHTML = reportHtml;
+            } catch (error) {
+                console.error('Error loading reports:', error);
+                reportsContent.innerHTML = '<p>Failed to load reports.</p>';
+            }
+        }
+
+        // System Settings Tab Content
+        async function loadSystemSettings() {
+            const systemTab = document.getElementById('system-tab');
+            if (!systemTab) {
+                const adminDashboard = document.getElementById('admin-dashboard');
+                const systemCard = document.createElement('div');
+                systemCard.className = 'card';
+                systemCard.id = 'system-tab';
+                systemCard.innerHTML = `
+                    <div class="card-header">
+                        <div class="card-title">System Settings</div>
+                    </div>
+                    <form id="system-settings-form">
+                        <div class="form-group">
+                            <label for="app-name">Application Name</label>
+                            <input type="text" id="app-name" class="form-control" value="Digital Clearance" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="notification-email">Notification Email</label>
+                            <input type="email" id="notification-email" class="form-control" placeholder="Enter notification email">
+                        </div>
+                        <button type="submit" class="btn">Save Settings</button>
+                    </form>
+                `;
+                adminDashboard.appendChild(systemCard);
+
+                document.getElementById('system-settings-form').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const appName = document.getElementById('app-name').value.trim();
+                    const notificationEmail = document.getElementById('notification-email').value.trim();
+                    try {
+                        await db.collection('settings').doc('app').set({
+                            appName,
+                            notificationEmail,
+                            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        });
+                        showNotification('Settings saved successfully.', 'success');
+                    } catch (error) {
+                        console.error('Error saving settings:', error);
+                        showNotification('Failed to save settings.', 'error');
+                    }
+                });
+            }
+        }
+
+        // Load reports and system settings when tabs are clicked
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                if (item.getAttribute('data-tab') === 'reports') {
+                    loadReports();
+                } else if (item.getAttribute('data-tab') === 'system') {
+                    loadSystemSettings();
+                }
+            });
+        });
+
+        // Profile Management - Load Profile Data
+        function loadProfile() {
+            if (!currentUser) return;
+            document.getElementById('profile-name').value = currentUser.name || '';
+            document.getElementById('profile-email').value = currentUser.email || '';
+            document.getElementById('profile-student-id').value = currentUser.studentId || '';
+            document.getElementById('profile-phone').value = currentUser.phone || '';
+            document.getElementById('profile-address').value = currentUser.address || '';
+        }
+
+        // Profile Form Submission
+        document.getElementById('profile-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUser) {
+                showNotification('Unauthorized action.', 'error');
+                return;
+            }
+            const phone = document.getElementById('profile-phone').value.trim();
+            const address = document.getElementById('profile-address').value.trim();
+            try {
+                await db.collection('users').doc(currentUser.id).update({
+                    phone: phone,
+                    address: address,
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                });
+                currentUser.phone = phone;
+                currentUser.address = address;
+                showNotification('Profile updated successfully.', 'success');
+            } catch (error) {
+                console.error('Error updating profile:', error);
+                showNotification('Failed to update profile.', 'error');
+            }
+        });
+
+        // Real-time listeners for student dashboard updates
+        function setupRealTimeListeners() {
+            if (!currentUser) return;
+            if (currentUser.role === 'student') {
+                db.collection('clearance_requests')
+                    .where('userId', '==', currentUser.id)
+                    .onSnapshot(() => {
+                        loadClearanceStatus();
+                        loadDocuments();
+                    });
+            } else if (currentUser.role === 'officer') {
+                db.collection('clearance_requests')
+                    .where('status', 'in', ['pending', 'approved', 'rejected'])
+                    .onSnapshot(() => {
+                        loadOfficerRequests();
+                    });
+            } else if (currentUser.role === 'admin') {
+                db.collection('users')
+                    .onSnapshot(() => {
+                        loadUsers();
+                    });
+            }
+        }
+
+        // Modify auth state change to setup real-time listeners and load data
+        auth.onAuthStateChanged((user) => {
+            if (user) {
+                db.collection('users').doc(user.uid).get()
+                    .then((doc) => {
+                        if (doc.exists) {
+                            currentUser = { id: doc.id, ...doc.data() };
+                            onboarding.style.display = 'none';
+                            authContainer.style.display = 'none';
+
+                            if (currentUser.role === 'student') {
+                                studentDashboard.style.display = 'block';
+                                document.getElementById('student-welcome').textContent = `Welcome, ${currentUser.name}!`;
+                                loadClearanceStatus();
+                                loadDocuments();
+                                loadProfile();
+                            } else if (currentUser.role === 'officer') {
+                                officerDashboard.style.display = 'block';
+                                document.getElementById('officer-welcome').textContent = `Welcome, ${currentUser.name}!`;
+                                loadOfficerRequests();
+                            } else if (currentUser.role === 'admin') {
+                                adminDashboard.style.display = 'block';
+                                document.getElementById('admin-welcome').textContent = `Welcome, ${currentUser.name}!`;
+                                loadUsers();
+                            }
+                            setupRealTimeListeners();
+                        }
+                    })
+                    .catch((error) => {
+                        console.error("Error getting user document:", error);
+                    });
+            }
+        });
